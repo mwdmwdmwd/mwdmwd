@@ -13,7 +13,7 @@ const overlayEl = document.getElementById('overlay');
 
 const W = canvas.width;
 const H = canvas.height;
-const STORAGE_KEY = 'yumi_brick_breaker_stage_shop_v141_allfix';
+const STORAGE_KEY = 'yumi_brick_breaker_stage_shop_v14';
 
 const THEMES = [
   { top: '#1e1b4b', bottom: '#0f172a', block: '#f472b6', number: '#fbcfe8', boss: '#fb7185', accent: '#f9a8d4', line: '#fdf2f8' },
@@ -59,7 +59,6 @@ const state = {
   bossHp: 0,
   bossMaxHp: 0,
   hearts: 0,
-  shopCharge: 0,
   comboTextUntil: 0,
   comboText: '',
   overlaysLocked: false,
@@ -76,7 +75,7 @@ const state = {
   selectedCoreUntil: 0,
   shopOffers: [],
   heartCycleProgress: 0,
-  heartScheduledRows: [],
+  heartScheduledRow: 1 + Math.floor(Math.random() * 5),
   itemLevels: {
     triangle: 0,
     long: 0,
@@ -114,9 +113,6 @@ function updateHUD() {
   stageInfoEl.textContent = `STAGE ${state.stage}`;
   scoreInfoEl.textContent = `점수 ${Math.floor(state.score)}`;
   heartCountEl.textContent = String(state.hearts);
-  const canOpenShop = state.hearts >= 5 && state.shopCharge >= 5 && !['choose','love','gameover1','gameover2','start','shop','status','paused'].includes(state.status);
-  shopBtn.style.opacity = canOpenShop ? '1' : '0.45';
-  shopBtn.style.transform = canOpenShop ? 'scale(1)' : 'scale(0.96)';
 
   const coreParts = [];
   if (state.itemLevels.triangle > 0) coreParts.push(`△ Lv${state.itemLevels.triangle}`);
@@ -164,12 +160,6 @@ function nowMs() { return performance.now(); }
 function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
 function rand(min, max) { return min + Math.random() * (max - min); }
 function choice(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
-
-function pickHeartRowsPerCycle() {
-  const set = new Set();
-  while (set.size < 2) set.add(1 + Math.floor(Math.random() * 5));
-  return [...set];
-}
 
 function mainFusionText() {
   const i = state.itemLevels;
@@ -220,7 +210,7 @@ function longMultiplier() {
   return 1 + (3 * lv) / 10; // Lv10 => x4.0 (old Lv3 scale)
 }
 function maxBallCount() {
-  const base = Math.max(2, state.itemLevels.triangle + 1);
+  const base = Math.max(1, state.itemLevels.triangle + 1);
   return base + (state.upgrades.maxBallBonus || 0);
 }
 
@@ -248,10 +238,11 @@ function bossDebuffCount() {
   if (n >= 121) return 12;
   if (n >= 111) return 10;
   if (n >= 101) return 10;
-  if (n >= 11) return Math.min(10, Math.floor((n - 1) / 10));
+  if (n >= 31) return 3;
+  if (n >= 21) return 2;
+  if (n >= 11) return 1;
   return 0;
 }
-
 function bossReinforcementCount() {
   const n = bossNumber();
   if (n >= 121) return 12;
@@ -373,7 +364,7 @@ function createStageRows() {
   bricks = [];
   resetPaddle();
   state.heartCycleProgress = 0;
-  state.heartScheduledRows = pickHeartRowsPerCycle();
+  state.heartScheduledRow = 1 + Math.floor(Math.random() * 5);
   const heartCol = Math.floor(rand(0, BRICK.cols));
   const numberPlan = currentNumberBlockPlan();
   const protectedCols = new Set();
@@ -397,22 +388,21 @@ function createStageRows() {
 
 function maybeMarkNewRowHeart(newRowBricks) {
   state.heartCycleProgress += 1;
-  if (state.heartScheduledRows.includes(state.heartCycleProgress) && newRowBricks.length) {
-    const nonHeart = newRowBricks.filter((b) => b.type !== 'heart');
-    const target = choice(nonHeart.length ? nonHeart : newRowBricks);
+  if (state.heartCycleProgress === state.heartScheduledRow && newRowBricks.length) {
+    const target = choice(newRowBricks);
     target.type = 'heart';
     target.hp = 1;
     target.maxHp = 1;
   }
   if (state.heartCycleProgress >= 5) {
     state.heartCycleProgress = 0;
-    state.heartScheduledRows = pickHeartRowsPerCycle();
+    state.heartScheduledRow = 1 + Math.floor(Math.random() * 5);
   }
 }
 
 function createBossStage() {
   if (bricks.some((b) => !b.destroyed && b.type === 'boss')) return;
-  const hp = (state.stage + 10);
+  const hp = (state.stage + 10) * 2;
   state.bossMaxHp = hp;
   state.bossHp = hp;
   const spawnY = BRICK.top - 3 * ROW_STEP;
@@ -426,8 +416,6 @@ function createBossStage() {
     hp,
     maxHp: hp,
     destroyed: false,
-    hitCooldownUntil: 0,
-    lastDebuffAt: 0,
   });
 }
 
@@ -457,9 +445,8 @@ function fullReset() {
   state.gameOverTapCount = 0;
   state.shopOffers = [];
   state.heartCycleProgress = 0;
-  state.heartScheduledRows = pickHeartRowsPerCycle();
+  state.heartScheduledRow = 1 + Math.floor(Math.random() * 5);
   state.hearts = 0;
-  state.shopCharge = 0;
   state.itemLevels = { triangle: 0, long: 0, vlaser: 0, hlaser: 0 };
   state.upgrades = {
     crit: 0,
@@ -661,7 +648,7 @@ function showShopOverlay() {
     </div>
   `);
   const wrap = document.getElementById('shopCards');
-  state.shopOffers.forEach((offer) => {
+  state.shopOffers.forEach((offer, idx) => {
     const disabled = state.hearts < offer.cost;
     const card = document.createElement('div');
     card.className = 'card';
@@ -678,19 +665,18 @@ function showShopOverlay() {
       if (state.hearts < offer.cost) return;
       state.hearts -= offer.cost;
       offer.apply();
-      state.shopCharge = 0;
       persistSave();
       closeOverlay();
-      state.status = 'playing';
+      state.status = 'paused';
       updateHUD();
+      showPauseOverlay();
     };
     wrap.appendChild(card);
   });
   document.getElementById('closeShopBtn').onclick = () => {
-    state.shopCharge = 0;
     closeOverlay();
-    state.status = 'playing';
-    updateHUD();
+    state.status = 'paused';
+    showPauseOverlay();
   };
 }
 
@@ -720,7 +706,7 @@ function showStatusOverlay() {
   `);
   document.getElementById('closeStatusBtn').onclick = () => {
     closeOverlay();
-    state.status = (state.previousStatus === 'playing' || state.previousStatus === 'shop' || state.previousStatus === 'status') ? 'playing' : 'paused';
+    state.status = state.previousStatus === 'playing' ? 'playing' : 'paused';
   };
 }
 
@@ -775,12 +761,9 @@ function spawnBossReinforcements() {
 function spawnBossDebuffs() {
   const count = bossDebuffCount();
   if (!count) return;
-  const boss = bricks.find((b) => !b.destroyed && b.type === 'boss');
-  const y = boss ? boss.y + boss.height * 0.5 : BRICK.top - 16;
   for (let i = 0; i < count; i += 1) {
-    debuffs.push({ x: rand(24, W - 24), y, vy: rand(2.5, 3.2), size: 16 + Math.min(6, count * 0.4) });
+    debuffs.push({ x: rand(24, W - 24), y: BRICK.top - 16, vy: rand(2.1, 2.8), size: 14 });
   }
-  addFloatingText(`디버프 x${count}`, W / 2, BRICK.top + 22, '#f43f5e', 16);
 }
 
 function randomActiveCoreKey() {
@@ -877,17 +860,14 @@ function destroyBrick(brick, silent = false) {
   }
   if (brick.type === 'heart' && !silent) {
     state.hearts += 1;
-    state.shopCharge += 1;
     persistSave();
     updateHUD();
-    addFloatingText('+1 ♥', brick.x + brick.width / 2, brick.y + brick.height / 2, '#fb7185', 16);
   }
   if (!silent && brick.type !== 'heart' && brick.type !== 'boss' && Math.random() < CORE_DROP_CHANCE) {
     spawnCoreDropFromBrick(brick);
   }
   if (brick.type === 'boss') {
     state.hearts += 3;
-    state.shopCharge += 3;
     state.runLove += 1;
     state.totalLove += 1;
     persistSave();
@@ -903,13 +883,8 @@ function destroyBrick(brick, silent = false) {
   }
 }
 
-function damageBrick(brick, amount, isBeam = false, textColor = null) {
+function damageBrick(brick, amount, isBeam = false) {
   if (brick.destroyed) return;
-  if (brick.type === 'boss') {
-    const now = nowMs();
-    if (brick.hitCooldownUntil && now < brick.hitCooldownUntil) return;
-    brick.hitCooldownUntil = now + 55;
-  }
   brick.hp -= amount;
   if (brick.type === 'boss') {
     state.bossHp = Math.max(0, brick.hp);
@@ -923,13 +898,12 @@ function damageBrick(brick, amount, isBeam = false, textColor = null) {
   if (brick.hp <= 0) {
     destroyBrick(brick);
   } else if (!isBeam) {
-    addFloatingText(`-${amount % 1 === 0 ? amount : amount.toFixed(2)}`, brick.x + brick.width / 2, brick.y + 8, textColor || '#fff', 12);
+    addFloatingText(`-${amount % 1 === 0 ? amount : amount.toFixed(2)}`, brick.x + brick.width / 2, brick.y + 8, '#fff', 12);
   }
 }
 
 function critDamage(base) {
-  const critical = Math.random() < critChance();
-  return { amount: critical ? base * 2 : base, critical };
+  return Math.random() < critChance() ? base * 2 : base;
 }
 
 function findBrickAtGrid(col, row) {
@@ -958,7 +932,7 @@ function splitBall(ball, totalCount) {
       y: ball.y - 2,
       vx: Math.cos(angle) * speed,
       vy: Math.sin(angle) * speed,
-      r: ball.r,
+      r: BALL_RADIUS,
       held: false,
       paddleHits: ball.paddleHits,
       skipSplitUntil: nowMs() + 350,
@@ -977,7 +951,7 @@ function spawnSelfSplit(ball) {
     y: ball.y,
     vx: Math.cos(angle) * speed,
     vy: Math.sin(angle) * speed,
-    r: ball.r,
+    r: BALL_RADIUS,
     held: false,
     paddleHits: 0,
     skipSplitUntil: nowMs() + 350,
@@ -985,6 +959,7 @@ function spawnSelfSplit(ball) {
   });
   addFloatingText('+분열', ball.x, ball.y, '#fde68a', 12);
 }
+
 
 function tryIncreaseMaxBall() {
   if (Math.random() < 0.25) {
@@ -1103,14 +1078,11 @@ function handleBallBrickCollision(ball) {
     if (minOverlap === overlapLeft || minOverlap === overlapRight) ball.vx *= -1;
     else ball.vy *= -1;
 
-    const result = critDamage(attackPower());
-    damageBrick(brick, result.amount, false, result.critical ? '#ef4444' : '#ffffff');
-    if (result.critical) addFloatingText('CRIT!', brick.x + brick.width / 2, brick.y - 6, '#ef4444', 13);
-
+    const dmg = critDamage(attackPower());
+    damageBrick(brick, dmg);
     if (state.upgrades.bomb > 0 && ball.bombReady && brick.type !== 'boss') {
       explosionAt(brick.col, brick.row);
-      addFloatingText('폭탄!', brick.x + brick.width / 2, brick.y, '#fbbf24', 16);
-      addParticles(brick.x + brick.width / 2, brick.y + brick.height / 2, '#f59e0b', 18, 4.2);
+      addFloatingText('폭탄!', brick.x + brick.width / 2, brick.y, '#fbbf24', 14);
       ball.bombReady = false;
       ball.paddleHits = 0;
     }
@@ -1170,10 +1142,7 @@ function updateBalls(dt) {
       ball.vy = -Math.abs(Math.cos(angle) * speed);
       ball.y = paddle.y - ball.r - 1;
       ball.paddleHits += 1;
-      if (state.upgrades.bomb > 0 && ball.paddleHits > 0 && ball.paddleHits % 5 === 0) {
-        ball.bombReady = true;
-        addFloatingText('폭탄 준비!', ball.x, ball.y - 10, '#f59e0b', 14);
-      }
+      if (state.upgrades.bomb > 0 && ball.paddleHits > 0 && ball.paddleHits % 5 === 0) ball.bombReady = true;
       next.push(ball);
       continue;
     }
@@ -1209,8 +1178,6 @@ function updateItems() {
   for (const item of items) {
     item.y += item.vy;
     item.x += item.vx || 0;
-    if (item.x - item.size <= 0) { item.x = item.size; item.vx = Math.abs(item.vx || 0.35); }
-    if (item.x + item.size >= W) { item.x = W - item.size; item.vx = -Math.abs(item.vx || 0.35); }
     item.wobble = (item.wobble || 0) + 0.08;
     item.x += Math.sin(item.wobble) * 0.25;
     item.rotation = (item.rotation || 0) + (item.spin || 0);
@@ -1290,7 +1257,6 @@ function update(dt) {
   updateBossAnimation(dt);
   updateRows(dt);
   updateAbilities(dt);
-  updateBossDebuffs();
   updateItems();
   updateBalls(dt);
   updateEffects(dt);
@@ -1462,23 +1428,6 @@ function drawBalls() {
     ctx.arc(ball.x, ball.y, ball.r, 0, Math.PI * 2);
     ctx.fillStyle = '#fbbf24';
     ctx.fill();
-    if (ball.r >= BALL_RADIUS * 3 - 0.1) {
-      ctx.strokeStyle = '#60a5fa';
-      ctx.lineWidth = 3;
-      ctx.stroke();
-    } else if (ball.r >= BALL_RADIUS * 2 - 0.1) {
-      ctx.strokeStyle = '#93c5fd';
-      ctx.lineWidth = 2.5;
-      ctx.stroke();
-    }
-    if (ball.bombReady) {
-      const pulse = 1 + Math.sin(nowMs() / 120) * 0.15;
-      ctx.beginPath();
-      ctx.arc(ball.x, ball.y, ball.r * 1.45 * pulse, 0, Math.PI * 2);
-      ctx.strokeStyle = 'rgba(245,158,11,0.95)';
-      ctx.lineWidth = 3;
-      ctx.stroke();
-    }
   });
 }
 
@@ -1571,11 +1520,9 @@ function drawDebuffs() {
   debuffs.forEach((d) => {
     ctx.save();
     ctx.translate(d.x, d.y);
-    const pulse = 1 + Math.sin(nowMs() / 120 + d.x) * 0.08;
-    ctx.scale(pulse, pulse);
     ctx.fillStyle = '#f43f5e';
     ctx.strokeStyle = '#fecdd3';
-    ctx.lineWidth = 2.5;
+    ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.moveTo(0, -d.size);
     ctx.lineTo(-d.size * 0.9, d.size);
@@ -1663,7 +1610,7 @@ pauseBtn.onclick = () => {
   }
 };
 shopBtn.onclick = () => {
-  if (state.hearts < 5 || state.shopCharge < 5 || ['choose', 'love', 'gameover1', 'gameover2', 'start', 'shop', 'status', 'paused'].includes(state.status)) return;
+  if (state.hearts < 5 || ['choose', 'love', 'gameover1', 'gameover2', 'start'].includes(state.status)) return;
   showShopOverlay();
 };
 statusBtn.onclick = () => {
