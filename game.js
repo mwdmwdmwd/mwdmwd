@@ -591,6 +591,8 @@ function showStartOverlay() {
   document.getElementById('startRunBtn').onclick = () => {
     closeOverlay();
     state.status = 'playing';
+    syncHeldBalls();
+    launchHeldBalls(paddle.x + paddle.width / 2, BRICK.top + 80);
   };
 }
 
@@ -1999,11 +2001,17 @@ function drawDebuffs() {
 
 function drawOverlayHints() {
   if (state.status === 'start') return;
-  if (state.status === 'playing' && balls.length && balls.every((b) => b.held)) {
+  if (state.status === 'playing' && balls.every((b) => b.held)) {
     ctx.fillStyle = 'rgba(0,0,0,0.35)';
     ctx.fillRect(0, 0, W, H);
     ctx.fillStyle = '#fff';
     ctx.font = 'bold 28px sans-serif';
+    if (brick.diseaseUntil && brick.diseaseUntil > nowMs()) {
+      ctx.save();
+      ctx.globalAlpha = 0.28;
+      roundRect(brick.x - 2, brick.y - 2, brick.width + 4, brick.height + 4, 8, '#22c55e', null);
+      ctx.restore();
+    }
     ctx.textAlign = 'center';
     ctx.fillText('탭해서 발사', W / 2, H / 2 - 10);
   }
@@ -2031,36 +2039,23 @@ function handleTap(clientX, clientY) {
     advanceGameOverTap();
     return;
   }
-  if (state.status === 'paused' || state.status === 'shop' || state.status === 'status' || state.status === 'fusion' || state.status === 'choose' || state.status === 'love') {
-    return;
-  }
   if (state.status === 'start') {
     closeOverlay();
     state.status = 'playing';
+    syncHeldBalls();
+    launchHeldBalls(pos.x, pos.y);
+    return;
   }
   if (balls.some((b) => b.held)) {
     launchHeldBalls(pos.x, pos.y);
   }
 }
 
-function tryLaunchFromEvent(clientX, clientY) {
-  const blockedStatuses = ['paused', 'shop', 'status', 'fusion', 'choose', 'love', 'gameover1', 'gameover2'];
-  if (blockedStatuses.includes(state.status)) return;
-  if (!balls.some((b) => b.held)) return;
-  handleTap(clientX, clientY);
-}
-
 canvas.addEventListener('touchstart', (e) => {
   e.preventDefault();
   const t = e.touches[0];
   movePaddle(t.clientX);
-}, { passive: false });
-
-canvas.addEventListener('touchend', (e) => {
-  e.preventDefault();
-  const t = e.changedTouches[0];
-  if (!t) return;
-  tryLaunchFromEvent(t.clientX, t.clientY);
+  handleTap(t.clientX, t.clientY);
 }, { passive: false });
 
 canvas.addEventListener('touchmove', (e) => {
@@ -2070,31 +2065,10 @@ canvas.addEventListener('touchmove', (e) => {
 
 canvas.addEventListener('mousedown', (e) => {
   movePaddle(e.clientX);
-});
-canvas.addEventListener('mouseup', (e) => {
-  tryLaunchFromEvent(e.clientX, e.clientY);
-});
-canvas.addEventListener('click', (e) => {
-  tryLaunchFromEvent(e.clientX, e.clientY);
+  handleTap(e.clientX, e.clientY);
 });
 canvas.addEventListener('mousemove', (e) => {
   if (e.buttons === 1) movePaddle(e.clientX);
-});
-
-document.addEventListener('touchend', (e) => {
-  if (e.target.closest && (e.target.closest('.corner-btn') || e.target.closest('.pause-btn') || e.target.closest('.modal'))) return;
-  const t = e.changedTouches && e.changedTouches[0];
-  if (!t) return;
-  const rect = canvas.getBoundingClientRect();
-  if (t.clientX < rect.left || t.clientX > rect.right || t.clientY < rect.top || t.clientY > rect.bottom) return;
-  tryLaunchFromEvent(t.clientX, t.clientY);
-}, { passive: true });
-
-document.addEventListener('mouseup', (e) => {
-  if (e.target.closest && (e.target.closest('.corner-btn') || e.target.closest('.pause-btn') || e.target.closest('.modal'))) return;
-  const rect = canvas.getBoundingClientRect();
-  if (e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) return;
-  tryLaunchFromEvent(e.clientX, e.clientY);
 });
 
 pauseBtn.onclick = () => {
