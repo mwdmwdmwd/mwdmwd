@@ -2031,10 +2031,12 @@ function handleTap(clientX, clientY) {
     advanceGameOverTap();
     return;
   }
+  if (state.status === 'paused' || state.status === 'shop' || state.status === 'status' || state.status === 'fusion' || state.status === 'choose' || state.status === 'love') {
+    return;
+  }
   if (state.status === 'start') {
     closeOverlay();
     state.status = 'playing';
-    return;
   }
   if (balls.some((b) => b.held)) {
     launchHeldBalls(pos.x, pos.y);
