@@ -18,7 +18,7 @@ body { min-height: 100vh; }
   background: radial-gradient(circle at top, #172554 0%, #0f172a 55%, #0b1120 100%);
 }
 .topbar {
-  width: min(98vw, 430px);
+  width: min(96vw, 430px);
   display: grid;
   grid-template-columns: 1fr 1fr auto;
   gap: 8px;
@@ -49,7 +49,7 @@ body { min-height: 100vh; }
   border: 1px solid rgba(255,255,255,0.1);
 }
 #game {
-  width: min(98vw, 430px);
+  width: min(96vw, 430px);
   height: auto;
   border-radius: 18px;
   border: 1px solid rgba(255,255,255,0.12);
@@ -60,7 +60,7 @@ body { min-height: 100vh; }
 }
 .corner-btn {
   position: fixed;
-  bottom: calc(14px + env(safe-area-inset-bottom));
+  bottom: calc(10px + env(safe-area-inset-bottom));
   min-width: 64px;
   min-height: 52px;
   border: none;
@@ -162,3 +162,9 @@ body { min-height: 100vh; }
 }
 
 .card .preview { color: #fde68a; font-weight: 700; }
+
+@media (max-height: 760px) {
+  .topbar { margin: 0 0 2px; }
+  .stat-group { padding: 6px 8px; min-height: 42px; }
+  .corner-btn { min-height: 46px; border-radius: 16px; padding: 6px 10px; }
+}

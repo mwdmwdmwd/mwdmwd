@@ -33,7 +33,7 @@ BRICK.width = Math.floor((W - 8 - BRICK.gap * (BRICK.cols - 1)) / BRICK.cols);
 BRICK.left = 4;
 const ROW_STEP = BRICK.height + BRICK.gap;
 const START_ROWS = 6;
-const BASE_PADDLE = { width: 92, height: 13, y: H - 96 };
+const BASE_PADDLE = { width: 92, height: 13, y: H - 112 };
 const BALL_RADIUS = 7;
 const BASE_BALL_SPEED = 5.2;
 const LOVE_DELAY = 3000;
@@ -75,6 +75,7 @@ const state = {
   gameOverTapCount: 0,
   selectedCoreUntil: 0,
   shopOffers: [],
+  rerollCost: 1,
   heartCycleProgress: 0,
   heartScheduledRows: [],
   itemLevels: {
@@ -167,7 +168,7 @@ function choice(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 
 function pickHeartRowsPerCycle() {
   const set = new Set();
-  while (set.size < 2) set.add(1 + Math.floor(Math.random() * 5));
+  while (set.size < 3) set.add(1 + Math.floor(Math.random() * 5));
   return [...set];
 }
 
@@ -217,7 +218,7 @@ function shieldCount() { return state.upgrades.shield || 0; }
 function longMultiplier() {
   const lv = state.itemLevels.long;
   if (lv <= 0) return 1;
-  return 1 + (3 * lv) / 10; // Lv10 => x4.0 (old Lv3 scale)
+  return 1 + (3.55 * lv) / 10; // Lv10 => x4.55 near full width
 }
 function maxBallCount() {
   const base = Math.max(2, state.itemLevels.triangle + 1);
@@ -316,6 +317,7 @@ function makeBall(x, y, angle = -Math.PI / 2) {
     paddleHits: 0,
     skipSplitUntil: 0,
     bombReady: false,
+    touchingIds: new Set(),
   };
 }
 
@@ -357,6 +359,8 @@ function launchHeldBalls(targetX, targetY) {
   state.status = 'playing';
 }
 
+let BRICK_UID_SEQ = 1;
+
 function createBrick(col, row, type = 'normal', hp = 1) {
   const x = BRICK.left + col * (BRICK.width + BRICK.gap);
   const y = BRICK.top + row * ROW_STEP;
@@ -370,6 +374,7 @@ function createBrick(col, row, type = 'normal', hp = 1) {
     type,
     hp,
     maxHp: hp,
+    uid: BRICK_UID_SEQ++,
   };
 }
 
@@ -434,6 +439,7 @@ function createBossStage() {
     hp,
     maxHp: hp,
     destroyed: false,
+    uid: BRICK_UID_SEQ++,
     hitCooldownUntil: 0,
     lastDebuffAt: 0,
   });
@@ -464,6 +470,7 @@ function fullReset() {
   state.lastMissileAt = nowMs();
   state.gameOverTapCount = 0;
   state.shopOffers = [];
+  state.rerollCost = 1;
   state.heartCycleProgress = 0;
   state.heartScheduledRows = pickHeartRowsPerCycle();
   state.hearts = 0;
@@ -613,6 +620,12 @@ function offerPreview(offer) {
       const cur = shieldCount();
       return `현재 ${cur}개 → ${Math.min(10, cur + 1)}개`;
     }
+    case 'clearBottomRows': {
+      return '패들에 가장 가까운 2줄 즉시 삭제';
+    }
+    case 'instantFusion': {
+      return '현재는 준비중';
+    }
     default:
       return '';
   }
@@ -641,12 +654,14 @@ function shopPool() {
     { key: 'crit', cost: 5, title: '치명타 +5%', desc: '공의 치명타 확률이 5% 증가', apply: () => state.upgrades.crit += 1 },
     { key: 'attack', cost: 5, title: '공격력 +0.25', desc: '공격력이 0.25 증가', apply: () => state.upgrades.attack += 1 },
     { key: 'addBall', cost: 5, title: '최대 공 +1 (25%)', desc: '25% 확률로 최대 공 개수가 1 증가', apply: () => tryIncreaseMaxBall() },
-    { key: 'bomb', cost: 10, title: '폭탄', desc: '패들에 5번 맞을 때마다 1회 폭탄 충전, 다음 충돌 때 주변에 2 데미지', apply: () => state.upgrades.bomb += 1 },
+    { key: 'speed', cost: 5, title: '속도 +0.5', desc: '공 기본 속도 +0.5', apply: () => state.upgrades.speed += 1 },
+    { key: 'bomb', cost: 10, title: '폭탄', desc: '패들에 5번 맞을 때마다 1회 폭탄 충전, 다음 충돌 때 주변에 범위 데미지', apply: () => state.upgrades.bomb += 1 },
     { key: 'giantBall', cost: 10, title: '거대 공', desc: '현재 공 중 랜덤 1개를 2배로, 이미 모두 2배면 1개를 3배로', apply: () => upgradeRandomBallSize() },
-    { key: 'speed', cost: 10, title: '속도 +0.5', desc: '공 기본 속도 +0.5', apply: () => state.upgrades.speed += 1 },
+    { key: 'clearBottomRows', cost: 10, title: '아래 2줄 삭제', desc: '패들에 가장 가까운 2줄을 제거 (보스 제외)', apply: () => clearBottomRows() },
+    { key: 'shield', cost: 10, title: '실드 +1', desc: '보스 디버프 1개를 막는 패들 실드 추가', apply: () => state.upgrades.shield = Math.min(10, (state.upgrades.shield || 0) + 1) },
     { key: 'leftDrone', cost: 15, title: '뿅뿅이', desc: '왼쪽 하트 드론 공격력 +0.5', apply: () => state.upgrades.leftDrone += 1 },
     { key: 'rightDrone', cost: 15, title: '뾱뾱이', desc: '오른쪽 하트 드론 공격력 +0.5', apply: () => state.upgrades.rightDrone += 1 },
-    { key: 'shield', cost: 15, title: '실드 +1', desc: '보스 디버프 1개를 막는 패들 실드 추가', apply: () => state.upgrades.shield = Math.min(10, (state.upgrades.shield || 0) + 1) },
+    { key: 'instantFusion', cost: 15, title: '즉시 융합', desc: '다음 업데이트용 자리. 현재는 구매 시 하트 15를 돌려줍니다.', apply: () => { state.hearts += 15; addFloatingText('융합 준비중', paddle.x + paddle.width/2, paddle.y - 24, '#fde68a', 14); } },
   ];
 }
 
@@ -659,47 +674,68 @@ function makeShopOffers() {
 function showShopOverlay() {
   state.previousStatus = state.status;
   state.status = 'shop';
+  state.shopCharge = 0;
+  state.rerollCost = 1;
   state.shopOffers = makeShopOffers();
-  openOverlay(`
-    <div class="modal">
-      <h2>하트 상점</h2>
-      <p>하트를 써서 능력치를 올려. 하트가 부족한 카드는 선택할 수 없어.</p>
-      <div class="cards cols-3" id="shopCards"></div>
-      <div class="actions"><button id="closeShopBtn" class="ghost-btn" style="flex:1">닫기</button></div>
-    </div>
-  `);
-  const wrap = document.getElementById('shopCards');
-  state.shopOffers.forEach((offer) => {
-    const disabled = state.hearts < offer.cost;
-    const card = document.createElement('div');
-    card.className = 'card';
-    card.innerHTML = `
-      <div>
-        <div class="cost">${offer.cost} ♥</div>
-        <h3>${offer.title}</h3>
-        <div class="desc">${offer.desc}</div>
-        <div class="desc preview">${offerPreview(offer)}</div>
+
+  function renderShop() {
+    openOverlay(`
+      <div class="modal">
+        <h2>하트 상점</h2>
+        <p>하트를 원하는 만큼 쓸 수 있어. 닫으면 다시 5개를 더 모아야 열 수 있어.</p>
+        <div class="cards cols-3" id="shopCards"></div>
+        <div class="actions">
+          <button id="rerollBtn" class="ghost-btn" style="flex:1">리롤 (${state.rerollCost}♥)</button>
+          <button id="closeShopBtn" class="primary-btn" style="flex:1">닫기</button>
+        </div>
       </div>
-      <button class="${disabled ? 'disabled' : ''}" ${disabled ? 'disabled' : ''}>선택</button>
-    `;
-    card.querySelector('button').onclick = () => {
-      if (state.hearts < offer.cost) return;
-      state.hearts -= offer.cost;
-      offer.apply();
-      state.shopCharge = 0;
-      persistSave();
+    `);
+    const wrap = document.getElementById('shopCards');
+    state.shopOffers.forEach((offer, i) => {
+      const disabled = state.hearts < offer.cost;
+      const card = document.createElement('div');
+      card.className = 'card';
+      card.innerHTML = `
+        <div>
+          <div class="cost">${offer.cost} ♥</div>
+          <h3>${offer.title}</h3>
+          <div class="desc">${offer.desc}</div>
+          <div class="desc preview">${offerPreview(offer)}</div>
+        </div>
+        <button class="${disabled ? 'disabled' : ''}" ${disabled ? 'disabled' : ''}>구매</button>
+      `;
+      card.querySelector('button').onclick = () => {
+        if (state.hearts < offer.cost) return;
+        state.hearts -= offer.cost;
+        offer.apply();
+        updateHUD();
+        renderShop();
+      };
+      wrap.appendChild(card);
+    });
+
+    const rerollBtn = document.getElementById('rerollBtn');
+    if (state.hearts < state.rerollCost) {
+      rerollBtn.classList.add('disabled');
+      rerollBtn.disabled = true;
+    }
+    rerollBtn.onclick = () => {
+      if (state.hearts < state.rerollCost) return;
+      state.hearts -= state.rerollCost;
+      state.rerollCost *= 2;
+      state.shopOffers = makeShopOffers();
+      updateHUD();
+      renderShop();
+    };
+
+    document.getElementById('closeShopBtn').onclick = () => {
       closeOverlay();
       state.status = 'playing';
       updateHUD();
     };
-    wrap.appendChild(card);
-  });
-  document.getElementById('closeShopBtn').onclick = () => {
-    state.shopCharge = 0;
-    closeOverlay();
-    state.status = 'playing';
-    updateHUD();
-  };
+  }
+
+  renderShop();
 }
 
 function showStatusOverlay() {
@@ -751,6 +787,19 @@ function upgradeRandomBallSize() {
     addFloatingText('모든 공 최대', paddle.x + paddle.width / 2, paddle.y - 24, '#fde68a', 14);
   }
   state.upgrades.giantBall = (state.upgrades.giantBall || 0) + 1;
+
+function clearBottomRows() {
+  const rows = [...new Set(bricks.filter((b) => !b.destroyed && b.type !== 'boss').map((b) => b.row))].sort((a,b)=>b-a).slice(0,2);
+  let removed = 0;
+  bricks.forEach((b) => {
+    if (!b.destroyed && b.type !== 'boss' && rows.includes(b.row)) {
+      destroyBrick(b, true);
+      removed += 1;
+    }
+  });
+  addFloatingText(`아래 ${rows.length}줄 삭제`, paddle.x + paddle.width/2, paddle.y - 26, '#fde68a', 14);
+}
+
 }
 
 function spawnBossReinforcements() {
@@ -927,8 +976,8 @@ function destroyBrick(brick, silent = false) {
     spawnCoreDropFromBrick(brick);
   }
   if (brick.type === 'boss') {
-    state.hearts += 3;
-    state.shopCharge += 3;
+    state.hearts += 5;
+    state.shopCharge += 5;
     state.runLove += 1;
     state.totalLove += 1;
     persistSave();
@@ -938,7 +987,7 @@ function destroyBrick(brick, silent = false) {
     openOverlay(`
       <div class="modal center-note">
         <div class="big-love">유미야 사랑해!</div>
-        <p>하트 +3 · 3초 뒤 다음 스테이지로 이어집니다.</p>
+        <p>하트 +5 · 3초 뒤 다음 스테이지로 이어집니다.</p>
       </div>
     `);
   }
@@ -1006,6 +1055,7 @@ function splitBall(ball, totalCount) {
       paddleHits: ball.paddleHits,
       skipSplitUntil: nowMs() + 350,
       bombReady: false,
+      touchingIds: new Set(),
     });
   }
   addParticles(ball.x, ball.y, theme().accent, 14, 3.5);
@@ -1025,6 +1075,7 @@ function spawnSelfSplit(ball) {
     paddleHits: 0,
     skipSplitUntil: nowMs() + 350,
     bombReady: false,
+    touchingIds: new Set(),
   });
   addFloatingText('+분열', ball.x, ball.y, '#fde68a', 12);
 }
@@ -1133,26 +1184,27 @@ function updateMissiles(dt) {
 }
 
 function handleBallBrickCollision(ball, prevX, prevY) {
+  const currentTouching = new Set();
   for (const brick of bricks) {
     if (brick.destroyed) continue;
     const rect = { x: brick.x, y: brick.y, width: brick.width, height: brick.height };
     if (!circleRectCollision(ball, rect)) continue;
+    currentTouching.add(brick.uid);
+
+    const giant = isGiantBall(ball);
+
+    if (brick.type !== 'boss' && giant) {
+      if (!ball.touchingIds.has(brick.uid)) {
+        const result = critDamage(attackPower());
+        damageBrick(brick, result.amount, false, result.critical ? '#ef4444' : '#ffffff');
+        if (result.critical) addFloatingText('CRIT!', brick.x + brick.width / 2, brick.y - 6, '#ef4444', 13);
+      }
+      continue;
+    }
 
     const result = critDamage(attackPower());
     damageBrick(brick, result.amount, false, result.critical ? '#ef4444' : '#ffffff');
     if (result.critical) addFloatingText('CRIT!', brick.x + brick.width / 2, brick.y - 6, '#ef4444', 13);
-
-    const giant = isGiantBall(ball);
-    if (brick.type !== 'boss' && giant) {
-      if (state.upgrades.bomb > 0 && ball.bombReady) {
-        explosionAt(brick.col, brick.row);
-        addFloatingText('폭탄!', brick.x + brick.width / 2, brick.y, '#fbbf24', 16);
-        addParticles(brick.x + brick.width / 2, brick.y + brick.height / 2, '#f59e0b', 22, 4.8);
-        ball.bombReady = false;
-        ball.paddleHits = 0;
-      }
-      return true;
-    }
 
     const overlapLeft = Math.abs(ball.x + ball.r - brick.x);
     const overlapRight = Math.abs(brick.x + brick.width - (ball.x - ball.r));
@@ -1174,15 +1226,18 @@ function handleBallBrickCollision(ball, prevX, prevY) {
       ball.vy = Math.abs(ball.vy);
     }
 
-    if (state.upgrades.bomb > 0 && ball.bombReady && brick.type !== 'boss') {
+    if (state.upgrades.bomb > 0 && ball.bombReady && brick.type !== 'boss' && !giant) {
       explosionAt(brick.col, brick.row);
       addFloatingText('폭탄!', brick.x + brick.width / 2, brick.y, '#fbbf24', 16);
       addParticles(brick.x + brick.width / 2, brick.y + brick.height / 2, '#f59e0b', 22, 4.8);
       ball.bombReady = false;
       ball.paddleHits = 0;
     }
+
+    ball.touchingIds = currentTouching;
     return true;
   }
+  ball.touchingIds = currentTouching;
   return false;
 }
 
