@@ -2043,11 +2043,24 @@ function handleTap(clientX, clientY) {
   }
 }
 
+function tryLaunchFromEvent(clientX, clientY) {
+  const blockedStatuses = ['paused', 'shop', 'status', 'fusion', 'choose', 'love', 'gameover1', 'gameover2'];
+  if (blockedStatuses.includes(state.status)) return;
+  if (!balls.some((b) => b.held)) return;
+  handleTap(clientX, clientY);
+}
+
 canvas.addEventListener('touchstart', (e) => {
   e.preventDefault();
   const t = e.touches[0];
   movePaddle(t.clientX);
-  handleTap(t.clientX, t.clientY);
+}, { passive: false });
+
+canvas.addEventListener('touchend', (e) => {
+  e.preventDefault();
+  const t = e.changedTouches[0];
+  if (!t) return;
+  tryLaunchFromEvent(t.clientX, t.clientY);
 }, { passive: false });
 
 canvas.addEventListener('touchmove', (e) => {
@@ -2057,10 +2070,31 @@ canvas.addEventListener('touchmove', (e) => {
 
 canvas.addEventListener('mousedown', (e) => {
   movePaddle(e.clientX);
-  handleTap(e.clientX, e.clientY);
+});
+canvas.addEventListener('mouseup', (e) => {
+  tryLaunchFromEvent(e.clientX, e.clientY);
+});
+canvas.addEventListener('click', (e) => {
+  tryLaunchFromEvent(e.clientX, e.clientY);
 });
 canvas.addEventListener('mousemove', (e) => {
   if (e.buttons === 1) movePaddle(e.clientX);
+});
+
+document.addEventListener('touchend', (e) => {
+  if (e.target.closest && (e.target.closest('.corner-btn') || e.target.closest('.pause-btn') || e.target.closest('.modal'))) return;
+  const t = e.changedTouches && e.changedTouches[0];
+  if (!t) return;
+  const rect = canvas.getBoundingClientRect();
+  if (t.clientX < rect.left || t.clientX > rect.right || t.clientY < rect.top || t.clientY > rect.bottom) return;
+  tryLaunchFromEvent(t.clientX, t.clientY);
+}, { passive: true });
+
+document.addEventListener('mouseup', (e) => {
+  if (e.target.closest && (e.target.closest('.corner-btn') || e.target.closest('.pause-btn') || e.target.closest('.modal'))) return;
+  const rect = canvas.getBoundingClientRect();
+  if (e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) return;
+  tryLaunchFromEvent(e.clientX, e.clientY);
 });
 
 pauseBtn.onclick = () => {
