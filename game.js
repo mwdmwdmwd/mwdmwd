@@ -242,6 +242,14 @@ function dronePower(side) {
   return v * 0.5;
 }
 
+function isGiantBall(ball) {
+  return ball.r > BALL_RADIUS * 1.5;
+}
+
+function bombSplashDamage() {
+  return 1 + Math.max(0, state.upgrades.bomb || 0);
+}
+
 function bossNumber() { return Math.floor(state.stage / 10); }
 function bossDebuffCount() {
   const n = bossNumber();
@@ -748,26 +756,44 @@ function upgradeRandomBallSize() {
 function spawnBossReinforcements() {
   const count = bossReinforcementCount();
   const hp = strongestBlockHp();
-  const used = new Set();
-  for (let i = 0; i < count; i += 1) {
-    let col = 0;
-    let row = 0;
-    let tries = 0;
-    do {
-      col = Math.floor(rand(0, BRICK.cols));
-      row = Math.floor(rand(0, Math.max(START_ROWS + 2, 8)));
-      tries += 1;
-    } while (used.has(`${col}:${row}`) && tries < 30);
-    used.add(`${col}:${row}`);
-    const existing = bricks.find((b) => !b.destroyed && b.type !== 'boss' && b.col === col && b.row === row);
+  const boss = bricks.find((b) => !b.destroyed && b.type === 'boss');
+  const candidates = [];
+  for (let row = 0; row < Math.max(START_ROWS + 4, 12); row += 1) {
+    for (let col = 0; col < BRICK.cols; col += 1) {
+      const probe = createBrick(col, row, 'elite', hp);
+      const overlapsBoss = boss && !(probe.x + probe.width <= boss.x || probe.x >= boss.x + boss.width || probe.y + probe.height <= boss.y || probe.y >= boss.y + boss.height);
+      if (overlapsBoss) continue;
+      candidates.push({ col, row });
+    }
+  }
+
+  const selected = [];
+  while (candidates.length && selected.length < count) {
+    const idx = Math.floor(Math.random() * candidates.length);
+    selected.push(candidates.splice(idx, 1)[0]);
+  }
+
+  let created = 0;
+  for (const pos of selected) {
+    const existing = bricks.find((b) => !b.destroyed && b.type !== 'boss' && b.col === pos.col && b.row === pos.row);
     if (existing) {
       existing.type = 'elite';
       existing.hp = Math.max(existing.hp, hp);
       existing.maxHp = existing.hp;
+      created += 1;
     } else {
-      const brick = createBrick(col, row, 'elite', hp);
+      const brick = createBrick(pos.col, pos.row, 'elite', hp);
       bricks.push(brick);
+      created += 1;
     }
+  }
+
+  const missing = Math.max(0, count - created);
+  if (boss && missing > 0) {
+    boss.hp += missing * 2;
+    boss.maxHp += missing * 2;
+    state.bossHp = boss.hp;
+    state.bossMaxHp = boss.maxHp;
   }
   addFloatingText('보스 증원!', W / 2, BRICK.top + 24, '#fca5a5', 20);
 }
@@ -776,14 +802,23 @@ function spawnBossDebuffs() {
   const count = bossDebuffCount();
   if (!count) return;
   const boss = bricks.find((b) => !b.destroyed && b.type === 'boss');
-  const y = boss ? boss.y + boss.height * 0.5 : BRICK.top - 16;
+  const y = boss ? boss.y + boss.height + 12 : BRICK.top - 16;
   for (let i = 0; i < count; i += 1) {
-    debuffs.push({ x: rand(24, W - 24), y, vy: rand(2.5, 3.2), size: 16 + Math.min(6, count * 0.4) });
+    debuffs.push({
+      x: rand(24, W - 24),
+      y,
+      vy: rand(2.7, 3.5),
+      vx: rand(-0.6, 0.6),
+      spin: rand(-0.09, 0.09),
+      rot: rand(0, Math.PI * 2),
+      size: 18 + Math.min(8, count * 0.35)
+    });
   }
-  addFloatingText(`디버프 x${count}`, W / 2, BRICK.top + 22, '#f43f5e', 16);
+  addFloatingText(`디버프 x${count}`, W / 2, Math.max(40, y), '#c084fc', 16);
 }
 
 function randomActiveCoreKey() {
+
   const keys = Object.keys(state.itemLevels).filter((k) => state.itemLevels[k] > 0);
   return keys.length ? choice(keys) : null;
 }
@@ -812,12 +847,18 @@ function applyBossDebuff() {
 }
 
 function updateBossDebuffs() {
-  for (const d of debuffs) d.y += d.vy;
+  for (const d of debuffs) {
+    d.y += d.vy;
+    d.x += d.vx || 0;
+    d.rot = (d.rot || 0) + (d.spin || 0);
+    if (d.x - d.size <= 0) { d.x = d.size; d.vx = Math.abs(d.vx || 0.4); }
+    if (d.x + d.size >= W) { d.x = W - d.size; d.vx = -Math.abs(d.vx || 0.4); }
+  }
   debuffs = debuffs.filter((d) => {
     const caught = d.y + d.size >= paddle.y && d.y - d.size <= paddle.y + paddle.height && d.x >= paddle.x && d.x <= paddle.x + paddle.width;
     if (caught) {
       applyBossDebuff();
-      addParticles(d.x, d.y, '#f43f5e', 10, 2.5);
+      addParticles(d.x, d.y, '#c084fc', 14, 3.2);
       return false;
     }
     return d.y - d.size <= H + 20;
@@ -937,10 +978,12 @@ function findBrickAtGrid(col, row) {
 }
 
 function explosionAt(col, row) {
+  const splash = bombSplashDamage();
   for (let r = row - 1; r <= row + 1; r += 1) {
     for (let c = col - 1; c <= col + 1; c += 1) {
+      if (c === col && r === row) continue;
       const target = findBrickAtGrid(c, r);
-      if (target) damageBrick(target, 2, true);
+      if (target) damageBrick(target, splash, true);
     }
   }
 }
@@ -1031,7 +1074,7 @@ function fireVerticalLightning() {
   if (!count) return;
   const cols = randomUniqueIndexes(BRICK.cols, count);
   cols.forEach((col) => {
-    state.beams.push({ type: 'v', x: BRICK.left + col * (BRICK.width + BRICK.gap) + BRICK.width / 2, y: BRICK.top, until: nowMs() + 220, color: '#60a5fa' });
+    state.beams.push({ type: 'v', x: BRICK.left + col * (BRICK.width + BRICK.gap) + BRICK.width / 2, startedAt: nowMs(), until: nowMs() + 320, color: '#60a5fa' });
     bricks.filter((b) => !b.destroyed && b.type !== 'boss' && b.col === col).forEach((brick) => damageBrick(brick, 1, true));
     const boss = bricks.find((b) => !b.destroyed && b.type === 'boss');
     if (boss) {
@@ -1047,7 +1090,7 @@ function fireHorizontalLightning() {
   const rowCount = 14;
   const rows = randomUniqueIndexes(rowCount, count);
   rows.forEach((row) => {
-    state.beams.push({ type: 'h', y: BRICK.top + row * ROW_STEP + BRICK.height / 2, until: nowMs() + 220, color: '#c084fc' });
+    state.beams.push({ type: 'h', y: BRICK.top + row * ROW_STEP + BRICK.height / 2, startedAt: nowMs(), until: nowMs() + 320, color: '#c084fc' });
     bricks.filter((b) => !b.destroyed && b.type !== 'boss' && b.row === row).forEach((brick) => damageBrick(brick, 1, true));
     const boss = bricks.find((b) => !b.destroyed && b.type === 'boss');
     if (boss) {
@@ -1089,28 +1132,52 @@ function updateMissiles(dt) {
   state.missiles = state.missiles.filter((m) => !m.dead && m.x >= -20 && m.x <= W + 20 && m.y >= -20 && m.y <= H + 20);
 }
 
-function handleBallBrickCollision(ball) {
+function handleBallBrickCollision(ball, prevX, prevY) {
   for (const brick of bricks) {
     if (brick.destroyed) continue;
     const rect = { x: brick.x, y: brick.y, width: brick.width, height: brick.height };
     if (!circleRectCollision(ball, rect)) continue;
+
+    const result = critDamage(attackPower());
+    damageBrick(brick, result.amount, false, result.critical ? '#ef4444' : '#ffffff');
+    if (result.critical) addFloatingText('CRIT!', brick.x + brick.width / 2, brick.y - 6, '#ef4444', 13);
+
+    const giant = isGiantBall(ball);
+    if (brick.type !== 'boss' && giant) {
+      if (state.upgrades.bomb > 0 && ball.bombReady) {
+        explosionAt(brick.col, brick.row);
+        addFloatingText('폭탄!', brick.x + brick.width / 2, brick.y, '#fbbf24', 16);
+        addParticles(brick.x + brick.width / 2, brick.y + brick.height / 2, '#f59e0b', 22, 4.8);
+        ball.bombReady = false;
+        ball.paddleHits = 0;
+      }
+      return true;
+    }
 
     const overlapLeft = Math.abs(ball.x + ball.r - brick.x);
     const overlapRight = Math.abs(brick.x + brick.width - (ball.x - ball.r));
     const overlapTop = Math.abs(ball.y + ball.r - brick.y);
     const overlapBottom = Math.abs(brick.y + brick.height - (ball.y - ball.r));
     const minOverlap = Math.min(overlapLeft, overlapRight, overlapTop, overlapBottom);
-    if (minOverlap === overlapLeft || minOverlap === overlapRight) ball.vx *= -1;
-    else ball.vy *= -1;
 
-    const result = critDamage(attackPower());
-    damageBrick(brick, result.amount, false, result.critical ? '#ef4444' : '#ffffff');
-    if (result.critical) addFloatingText('CRIT!', brick.x + brick.width / 2, brick.y - 6, '#ef4444', 13);
+    if (minOverlap === overlapLeft) {
+      ball.x = brick.x - ball.r - 0.5;
+      ball.vx = -Math.abs(ball.vx);
+    } else if (minOverlap === overlapRight) {
+      ball.x = brick.x + brick.width + ball.r + 0.5;
+      ball.vx = Math.abs(ball.vx);
+    } else if (minOverlap === overlapTop) {
+      ball.y = brick.y - ball.r - 0.5;
+      ball.vy = -Math.abs(ball.vy);
+    } else {
+      ball.y = brick.y + brick.height + ball.r + 0.5;
+      ball.vy = Math.abs(ball.vy);
+    }
 
     if (state.upgrades.bomb > 0 && ball.bombReady && brick.type !== 'boss') {
       explosionAt(brick.col, brick.row);
       addFloatingText('폭탄!', brick.x + brick.width / 2, brick.y, '#fbbf24', 16);
-      addParticles(brick.x + brick.width / 2, brick.y + brick.height / 2, '#f59e0b', 18, 4.2);
+      addParticles(brick.x + brick.width / 2, brick.y + brick.height / 2, '#f59e0b', 22, 4.8);
       ball.bombReady = false;
       ball.paddleHits = 0;
     }
@@ -1135,6 +1202,8 @@ function updateBalls(dt) {
       next.push(ball);
       continue;
     }
+    const prevX = ball.x;
+    const prevY = ball.y;
     ball.x += ball.vx;
     ball.y += ball.vy;
 
@@ -1143,7 +1212,7 @@ function updateBalls(dt) {
     if (ball.y - ball.r <= 0) { ball.y = ball.r; ball.vy *= -1; }
 
     const triSplitCount = splitCountForLevel();
-    const triZone = triSplitCount > 0 ? {
+    const triZone = triSplitCount > 0 && !isGiantBall(ball) ? {
       x: paddle.x,
       y: paddle.y - 24,
       width: paddle.width,
@@ -1169,16 +1238,18 @@ function updateBalls(dt) {
       ball.vx = Math.sin(angle) * speed;
       ball.vy = -Math.abs(Math.cos(angle) * speed);
       ball.y = paddle.y - ball.r - 1;
-      ball.paddleHits += 1;
-      if (state.upgrades.bomb > 0 && ball.paddleHits > 0 && ball.paddleHits % 5 === 0) {
-        ball.bombReady = true;
-        addFloatingText('폭탄 준비!', ball.x, ball.y - 10, '#f59e0b', 14);
+      if (!isGiantBall(ball)) {
+        ball.paddleHits += 1;
+        if (state.upgrades.bomb > 0 && ball.paddleHits > 0 && ball.paddleHits % 5 === 0) {
+          ball.bombReady = true;
+          addFloatingText('폭탄 준비!', ball.x, ball.y - 10, '#f59e0b', 14);
+        }
       }
       next.push(ball);
       continue;
     }
 
-    handleBallBrickCollision(ball);
+    handleBallBrickCollision(ball, prevX, prevY);
     if (ball.y - ball.r <= H + 20) next.push(ball);
   }
   balls = next;
@@ -1519,17 +1590,22 @@ function drawMissiles() {
 }
 
 function drawBeams() {
+  const now = nowMs();
   state.beams.forEach((beam) => {
+    const progress = clamp((now - (beam.startedAt || now)) / Math.max(1, (beam.until - (beam.startedAt || now))), 0, 1);
     ctx.strokeStyle = beam.color;
     ctx.lineWidth = 4;
-    ctx.globalAlpha = 0.7;
+    ctx.globalAlpha = 0.78;
     ctx.beginPath();
     if (beam.type === 'v') {
-      ctx.moveTo(beam.x, BRICK.top - 8);
-      ctx.lineTo(beam.x, paddle.y + 18);
+      const endY = paddle.y + 18;
+      const drawEnd = -42 + (endY + 42) * progress;
+      ctx.moveTo(beam.x, -42);
+      ctx.lineTo(beam.x, drawEnd);
     } else {
-      ctx.moveTo(0, beam.y);
-      ctx.lineTo(W, beam.y);
+      const drawEnd = -42 + (W + 84) * progress;
+      ctx.moveTo(-42, beam.y);
+      ctx.lineTo(drawEnd, beam.y);
     }
     ctx.stroke();
     ctx.globalAlpha = 1;
@@ -1571,22 +1647,35 @@ function drawDebuffs() {
   debuffs.forEach((d) => {
     ctx.save();
     ctx.translate(d.x, d.y);
+    ctx.rotate(d.rot || 0);
     const pulse = 1 + Math.sin(nowMs() / 120 + d.x) * 0.08;
     ctx.scale(pulse, pulse);
-    ctx.fillStyle = '#f43f5e';
-    ctx.strokeStyle = '#fecdd3';
+    ctx.fillStyle = '#a855f7';
+    ctx.strokeStyle = '#f0abfc';
     ctx.lineWidth = 2.5;
+
     ctx.beginPath();
-    ctx.moveTo(0, -d.size);
-    ctx.lineTo(-d.size * 0.9, d.size);
-    ctx.lineTo(d.size * 0.9, d.size);
+    for (let i = 0; i < 6; i += 1) {
+      const ang = Math.PI / 3 * i - Math.PI / 6;
+      const rr = d.size * (i === 2 ? 0.72 : 1);
+      const px = Math.cos(ang) * rr;
+      const py = Math.sin(ang) * rr;
+      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    }
     ctx.closePath();
     ctx.fill();
     ctx.stroke();
-    ctx.fillStyle = '#fff';
-    ctx.font = 'bold 12px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('!', 0, 4);
+
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 2.2;
+    ctx.beginPath();
+    ctx.moveTo(0, -d.size * 0.35);
+    ctx.lineTo(0, d.size * 0.15);
+    ctx.lineTo(-d.size * 0.26, -0.5);
+    ctx.moveTo(0, d.size * 0.15);
+    ctx.lineTo(d.size * 0.26, -0.5);
+    ctx.stroke();
+
     ctx.restore();
   });
 }
