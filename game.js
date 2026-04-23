@@ -1999,17 +1999,11 @@ function drawDebuffs() {
 
 function drawOverlayHints() {
   if (state.status === 'start') return;
-  if (state.status === 'playing' && balls.every((b) => b.held)) {
+  if (state.status === 'playing' && balls.length && balls.every((b) => b.held)) {
     ctx.fillStyle = 'rgba(0,0,0,0.35)';
     ctx.fillRect(0, 0, W, H);
     ctx.fillStyle = '#fff';
     ctx.font = 'bold 28px sans-serif';
-    if (brick.diseaseUntil && brick.diseaseUntil > nowMs()) {
-      ctx.save();
-      ctx.globalAlpha = 0.28;
-      roundRect(brick.x - 2, brick.y - 2, brick.width + 4, brick.height + 4, 8, '#22c55e', null);
-      ctx.restore();
-    }
     ctx.textAlign = 'center';
     ctx.fillText('탭해서 발사', W / 2, H / 2 - 10);
   }
